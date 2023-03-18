@@ -1,0 +1,880 @@
+---
+title: "Choose Your Own Project"
+author: "Osman Yardimci"
+date: "2023-03-17"
+output: pdf_document
+---
+
+# Introduction:
+
+The relationship between crime rates and punishment regimes has long been of interest to criminologists. In this project, we will be using a data set that contains information on various factors, such as unemployment rates, education levels, and police expenditures, that may influence crime rates. The data set includes information on 47 states in the USA for the year 1960.
+
+The project is divided into four parts. In the first part, we will use the R package 'outliers' to test for any outliers in the crime rate data. In the second part, we will use regression analysis to predict the crime rate in a hypothetical city based on the given data. We will also assess the quality of fit of the model.
+
+In the third part, we will apply principal component analysis (PCA) to the data set and then create a regression model using the first few principal components. We will compare the quality of this model with the model created in part two. Finally, in the fourth part, we will build regression models using stepwise regression, lasso, and elastic net methods, and compare their results.
+
+Overall, this project aims to explore the relationship between various factors and crime rates and to test different methods of regression analysis to build models that can predict crime rates.
+
+Importing the required packages.
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+library(outliers)
+library(ggplot2)
+library(DAAG)
+library(boot)
+library(GGally)
+library(pls)
+library(caret)
+library(glmnet)
+```
+
+Uploading data
+
+```{r}
+# read the table from the web link
+url <- "http://www.statsci.org/data/general/uscrime.txt"
+data <- read.table(url, header = TRUE, sep = "\t")
+
+
+```
+
+# Part 1
+This section will involve the implementation of the 'outliers' R package to 
+examine the presence of any outliers in the crime rate dataset.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+# Crime is the variable of interest
+crime <- data[,"Crime"]
+
+# Run the Shapiro-Wilk test to test the normality of the crime data
+
+shapiro.test(crime)
+```
+
+Initially, the Grubbs test is based on the assumption of normality. Hence, we 
+perform a normality test, the Shapiro-Wilk test, which is commonly known from 
+elementary statistics. However, the test indicates non-normality of the data 
+(p=0.001882). Despite this, upon inspecting the Q-Q plot, we observe that the 
+non-normality is primarily due to the tails, which suggests that the test may 
+be influenced by possible outliers. As the central part of the distribution 
+appears to be normal, we proceed with the Grubbs test.
+
+
+```{r QQ_Plot, echo = FALSE}
+qqnorm(crime)
+qqnorm(scale(crime))
+```
+
+Upon examining the Q-Q plot, it is evident that the central portion of the data 
+adheres to normal distribution. Therefore, we can make an assumption that the 
+data is approximately normally distributed and proceed with conducting the 
+Grubbs' test.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+# Run the Grubbs' test for two outliers on opposite tails
+
+test <- grubbs.test(crime, type = 11)
+
+# Print results of grubbs test
+
+test
+```
+
+The obtained p-value implies the rejection of the null hypothesis that the data 
+follows a normal distribution. However, it is essential to note that normality 
+tests have a tendency to overlook the bigger picture and may provide inaccurate 
+outcomes by concentrating excessively on specific data points. This is 
+particularly true in the presence of outliers, which is precisely what we aim to
+detect.
+
+It is worth noting that the decision to proceed with the Grubbs test is 
+subjective. On one hand, it is possible that the Shapiro-Wilk test is detecting
+non-normal tails, particularly on the upper end, such that the extreme values 
+are not outliers but are rather part of the distribution. On the other hand, it 
+is possible that the distribution is reasonably close to normal, and the test's 
+failure is due to the presence of outliers. The reliability of the Grubbs test
+relies on which of these situations is more accurate.
+
+In this scenario, we will proceed with the Grubbs test. At the worst, the test 
+will either reveal no outliers, or it will highlight potential outliers that we 
+would investigate more closely. We would 
+thoroughly investigate these data points to determine whether they are genuine 
+outliers or whether they are a genuine part of the distribution.
+
+
+Now, let us examine each one separately.
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+test <- grubbs.test(crime, type = 10)
+test
+```
+The statistical analysis indicates that it is improbable for the city with the 
+lowest crime rate to be an outlier. The p-value is so close to 1 that it is 
+rounded up to 1.
+
+The classification of the data point as an outlier depends on the selected 
+threshold p-value. Different individuals may choose to use different threshold 
+values such as p=0.05 or p=0.10. For this analysis, we will designate the data 
+point as an outlier. Moving forward, we will now examine the second highest 
+point to determine whether it is also an outlier.
+
+
+To proceed with the analysis, we will create a new dataset that excludes the 
+largest value.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+crime2 <- crime[-which.max(crime)]
+
+# Now test it
+
+test <- grubbs.test(crime2, type = 10)
+test
+```
+
+The p-value for the second-highest crime city in the initial dataset is notably
+low, indicating that it is also an outlier. Therefore, we will remove this city 
+from the analysis and proceed to examine the next city.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+# So, let's remove it, and test the next one.
+
+crime3 <- crime2[-which.max(crime2)]
+test <- grubbs.test(crime3, type = 10)
+test
+```
+
+The p-value for the next city is sufficiently high, which makes it unclear 
+whether or not it should be considered an outlier. Therefore, we will stop here 
+and remove the two highest points as outliers. However, it is also necessary to 
+check the lowest point in the data set. The grubbs.test function selected the 
+most outlying data points, which were both high points. To identify the most 
+outlying low point, we will use the opposite=TRUE parameter.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+test <- grubbs.test(crime3,type=10,opposite=TRUE)
+test
+```
+
+The p-value obtained after testing the lowest-crime city for being an outlier is
+very high and rounds to 1. Hence, it seems that this city is not an outlier. 
+This is consistent with the result obtained from the previous test, which checked
+both the extreme values and also returned a p-value of 1. It is worth noting that
+removing the two outliers before testing the lowest value did not affect the 
+outcome.
+
+Conversely, the city with the highest crime rate may be considered an outlier as
+the p-value is 0.079. Furthermore, upon removal of this city, the second-highest
+crime city is also suspected to be an outlier, with a p-value of 0.028. These 
+outliers are illustrated more explicitly in the box-and-whisker plot presented 
+below.
+
+```{r BoxWhiskerPlot, echo = FALSE}
+# Create a function that calculates the specified quantiles (5%, 25%, 50%, 75%, 
+# and 95%) of a given dataset.
+
+quant <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+
+# Generate a data frame that exclusively contains the crime data.
+
+df <- data.frame(x = rep(1, nrow(data)), y = crime)
+
+# Create a function to identify data points below 5% and above 95% quantiles.
+    
+outliers <- function(x) {
+  subset(x, x < quantile(x, 0.05) | quantile(x, 0.95) < x)
+}
+
+# Create the box-and-whisker plot
+
+ggplot(df, aes(x, y)) + 
+  stat_summary(fun.data = quant, geom="boxplot") + 
+  stat_summary(fun.y = outliers, geom="point")
+```
+
+# Results of Part 1
+From the visualization, it appears that the two cities with the highest crime 
+rates are likely outliers, while the two cities with the lowest crime rates are 
+not too far from the norm and may not be considered outliers.
+
+# Part 2
+
+In this part of our analysis involves utilizing regression analysis to forecast 
+the crime rate in an imaginary city using the provided data. We will also 
+evaluate the model's level of accuracy.
+
+Initially, the code reads in the data and fits a linear regression model using 
+all 15 factors. The predicted crime rate for a new data point based on this model
+is approximately 155, which is problematic because the lowest crime rate in the
+dataset is 342. This occurs because the model includes factors that are not 
+significant, as evidenced by their high p-values. Although removing factors with
+high p-values is not always a good idea, the code proceeds to do so for this 
+particular case, considering only factors with initial p-values of 0.10 or lower.
+This results in a reduced number of factors and all remaining factors have 
+p-values less than 0.05. With this revised model, the predicted crime rate for 
+the new data point is a more reasonable 1304.
+
+The dependent variable in this analysis is Crime, while the other variables are 
+independent predictors. The model is built using the lm() function with the 
+entire dataset, and is used for prediction without choosing between different 
+models or estimating model quality. Therefore, there is no need for validation 
+or test data.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+model <- lm( Crime ~ ., data = data)
+
+#Summary of the model
+
+summary(model)
+```
+
+Create a new data point for testing purposes using a dataframe.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+test <-data.frame(M = 14.0,So = 0, Ed = 10.0, Po1 = 12.0, Po2 = 15.5,LF = 0.640,
+                  M.F = 94.0, Pop = 150, NW = 1.1, U1 = 0.120, U2 = 3.6, 
+                  Wealth = 3200, Ineq = 20.1, Prob = 0.040,Time = 39.0)
+
+
+#Predict the crime rate for test data point
+
+pred_model <- predict(model, test)
+pred_model
+```
+
+The result is surprising! The predicted crime rate is significantly lower than the 
+next lowest city's crime rate. Even though the test data point's factor values 
+are all within the range of other data points, the prediction is not accurate. 
+I intentionally chose this data point to demonstrate that the full model used 
+earlier includes several insignificant factors. It's natural to wonder why we 
+can't use the entire model, even if some factors are insignificant. This is a 
+perfect example of why that's not a good idea. We need to go back and use only 
+the significant factors to get a reliable estimate. Let's try including only the
+factors with p-values less than or equal to 0.1. (In Part 4, we'll explore 
+better ways to do this.)
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+model2 <- lm( Crime ~  M + Ed + Po1 + U2 + Ineq + Prob, data = data)
+
+#Summary of the model
+
+summary(model2)
+```
+
+Lets predict on our test observation
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+# do 5-fold cross-validation
+
+c <- cv.lm(data,model2,m=5) 
+# note that here, "m" is used for the number of folds, rather than the usual "k"
+#c
+```
+
+The cross-validation technique shows the average squared prediction error 
+denoted as "ms." However, it is important to note that there is an error in the
+cv.lm function, which incorrectly states that "n" represents the sum of all 
+folds when in reality, "n" indicates the number of data points in the last fold.
+To calculate the R-squared values, we can directly use the formula:
+
+$$\text{R-squared} = 1 - \frac{\text{SSEresiduals}}{\text{SSEtotal}}$$
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+# total sum of squared differences between data and its mean
+SStot <- sum((data$Crime - mean(data$Crime))^2)
+# for model, model2, and cross-validation, calculated SEres
+SSres_model <- sum(model$residuals^2)
+SSres_model2 <- sum(model2$residuals^2)
+SSres_c <- attr(c,"ms")*nrow(data) 
+# mean squared error, times number of data points, gives sum of squared errors
+# Calculate R-squareds for model, model2, cross-validation
+1 - SSres_model/SStot # initial model with insignificant factors
+1 - SSres_model2/SStot # model2 without insignificant factors
+1 - SSres_c/SStot # cross-validated
+```
+
+The inclusion of insignificant factors leads to overfitting compared to 
+excluding them, and it's possible that the fitted model is also overfitted. 
+This outcome is not unexpected since we had a limited number of data points 
+(only 47) to predict 15 different factors. The ratio of data points to factors 
+was roughly 3:1, which is typically inadequate, as a ratio of 10:1 or greater 
+is considered ideal. In Part 4, we will explore possible solutions to this issue.
+
+We could also attempt to perform cross-validation using the initial 15-factor model.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+cfirst <- cv.lm(data,model,m=5)
+SSres_cfirst <- attr(cfirst,"ms")*nrow(data) 
+# mean squared error, times number of data points, gives sum of squared errors
+1 - SSres_cfirst/SStot # cross-validated
+```
+
+The significant deviation from the lm() reported R-squared value of 0.803 on the
+training dataset highlights the importance of validation.
+
+# Results of Part 2
+Now let’s look at quality of the model.  The first model’s R2 on training data 
+was 0.803, and the second’s was 0.766 – including the factors with high p-values
+leads to some overfitting.  But measuring on training data isn’t a good estimate,
+also because of the possibility of overfitting.  We can use cross-validation to
+estimate the quality of this model.  In the R-code, I used 5-fold 
+cross-validation, and found an R2 of about 0.638.  This is lower than the 
+performance on the training data, indicating that there was still some 
+overfitting going on.  And that’s not surprising.  We have just 47 data points, 
+and 15 factors, a ratio of about 3:1, and it’s usually good to have a ratio of 
+10:1 or more.  Even the smaller model’s ratio was below 10:1.  (We’ll see in 
+Module 11 ways we can try to get around this problem.)
+
+But note that the 15-factor model (including the factors with high p-values) was
+much worse – its cross-validation R2 was just 0.413 (compared to its reported 
+performance on training data of 0.803). That’s almost a factor of 2 difference;
+it suggests a lot of overfitting, and demonstrates why we can’t just use a 
+fitted model’s reported R2 without doing some kind of validation!
+
+# Part 3
+
+In this part, we will utilize principal component analysis (PCA) on the dataset
+and use the first few principal components to develop a regression model. We 
+will then evaluate the performance of this model against the one we created in 
+part two.
+
+
+```{r CheckingCorrelation, echo = FALSE}
+#Plot some 2D graphs of the data to see if there is correlation or not
+ggpairs(data, columns = c("Po1", "Po2", "U1", "U2", "Ineq", "Crime"),
+                 mapping=ggplot2::aes(color= "#3366FF"))
+#Also can look at the correlation matrix of the data
+corr <- cor(data)
+round(corr, 2)
+```
+
+Run PCA on matrix of scaled predictors
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+pca <- prcomp(data[,1:15], scale. = TRUE)
+summary(pca)
+```
+
+When determining the number of principal components to use, the following 
+visualizations can be helpful. However, in this instance, we are instructed to 
+use only the first four principal components.
+
+```{r ScatterPlot, echo = FALSE}
+screeplot(pca, type="lines",col="blue")
+```
+
+Calculate the variances and proportion of variances from the pca object
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+var <- pca$sdev^2
+propvar <- var/sum(var)
+```
+
+Plot the proportion of variances from PCA
+
+```{r ProportionOfVariances, echo = FALSE}
+plot(propvar, xlab = "Principal Component", 
+     ylab = "Proportion of Variance Explained", ylim = c(0,1), type = "b")
+```
+
+Plot the cumsum proportion of variances from PCA
+
+```{r CumsumProportionOfVariances, echo = FALSE}
+cumsum(propvar)
+plot(cumsum(propvar), xlab = "Principal Component", 
+     ylab = "Cumulative Proportion of Variance Explained",ylim = c(0,1), type = "b")
+
+```
+
+# Get 4 PCs
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+# Method 1: direct from prcomp output
+
+PCs <- pca$x[,1:4]
+#attributes(pca$x)
+#pca$x
+#PCs
+
+# Method 2: calculated from prcomp output
+
+data.scale <- as.data.frame(scale(data[,1:15]))
+data.mat = as.matrix(data.scale)
+PCs2 <- data.mat %*% pca$rotation[,1:4]
+
+#pca$rotation[,1:4]
+
+PCs[1,]
+PCs2[1,]
+
+# Method 3: calculated using the math, if you did not use the prcomp function
+
+E <- eigen(t(data.mat) %*% data.mat)
+PCs3 <- data.mat %*% E$vectors[,1:4]
+```
+
+## Regression on first 4 PCs
+Construct a linear regression model using the initial 4 principal components.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+PCcrime <- cbind(PCs, data[,16]) #Create new data matrix with first 4 PCs and crime rate
+
+# Convert matrix PCcrime to a data frame
+PCcrime_df <- as.data.frame(PCcrime)
+
+# Create linear regression model using first 4 principal components and crime rate
+model <- lm(PCcrime_df[,5] ~ ., data = PCcrime_df)
+
+#PCcrime
+
+# as.data.frame(PCcrime_df) #Shows why is it referencing V5
+
+model <- lm(PCcrime_df[,5]~., data = PCcrime_df) #Not correct way
+
+model <- lm(V5~., data = as.data.frame(PCcrime_df)) #Create regression model 
+#on new data matrix
+
+summary(model)
+```
+
+### Retrieve the coefficients in terms of the original variables from the PCA coefficients.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+beta0 <- model$coefficients[1]
+betas <- model$coefficients[2:5]
+beta0
+
+## (Intercept) 
+## 905 
+
+betas
+
+##  PC1   PC2   PC3   PC4 
+## 65.2 -70.1  25.2  69.4 
+
+# Transform the PC coefficients into coefficients for the original variables
+
+pca$rotation[,1:4]
+alphas <- pca$rotation[,1:4] %*% betas
+t(alphas)
+```
+
+However, the coefficients obtained from PCA are based on the scaled data. Thus, 
+in order to use these coefficients with the original unscaled data, we need to 
+perform a reverse scaling operation. This involves multiplying the coefficients 
+obtained from PCA by the standard deviation of the original variables, and then 
+adding the mean of the original variables. This will give us the coefficients in
+terms of the original data.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+originalAlpha <- alphas/sapply(data[,1:15],sd)
+originalBeta0 <- beta0 - sum(alphas*sapply(data[,1:15],mean)/sapply(data[,1:15],sd))
+# Here are the coefficients for unscaled data:
+t(originalAlpha)
+originalBeta0
+```
+
+ Here are the estimates from this model:
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+estimates <- as.matrix(data[,1:15]) %*% originalAlpha + originalBeta0
+```
+
+Now, compute the R-squared and adjusted R-squared values for the linear regression model.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+SSE = sum((estimates - data[,16])^2)
+SStot = sum((data[,16] - mean(data[,16]))^2)
+1 - SSE/SStot
+R2 <- 1 - SSE/SStot
+R2 - (1 - R2)*4/(nrow(data)-4-1)
+```
+
+As anticipated, the R-squared and Adjusted R-squared values are identical when 
+using the PCA dimensions and converting back to the original variables. However,
+it is important to note that when calculating the Adjusted R-squared value, we 
+must use the number of principal components, i.e., 4, instead of the original 
+number of variables, i.e., 15, since we only fitted coefficients for the 4 
+principal components.
+
+Now, we will compare the current regression model, which was built using the 
+first 4 principal components, with the regression model from the previous part, 
+which used all 15 variables.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+model2 <- lm( Crime ~ ., data = data)
+summary(model2)
+```
+
+Based on these results, it appears that using a simpler linear regression model 
+with all 15 original predictors may be a better approach, rather than using PCA 
+before applying regression. When we used all 15 principal components, we 
+obtained an R-squared value of 0.803, which is equivalent to the R-squared value
+obtained from a basic linear regression model using all 15 original predictors.
+
+To explore the impact of using different numbers of principal components on the 
+regression model, we can run a series of regressions for i=1 to 15, using the 
+first i principal components as predictors. This will allow us to compare the 
+performance of regression models using different numbers of principal components.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+r2 <- numeric(15) # create a vector to store the R-squared values
+
+for (i in 1:15) {
+  pclist <- pca$x[,1:i]  # use the first i prinicipal components
+  pcc <- cbind(data[,16],pclist)  # create data set
+  model <- lm(V1~.,data = as.data.frame(pcc)) # fit model
+  r2[i] <- 1 - sum(model$residuals^2)/sum((data$Crime - mean(data$Crime))^2) # calculate R-squared
+}
+
+r2
+```
+
+We can compare the performance of regression models with different numbers of 
+principal components by plotting two graphs: the cumulative proportion of 
+variance explained and the R-squared value obtained using the corresponding 
+number of principal components.
+
+The first plot will show the cumulative proportion of variance explained as we 
+increase the number of principal components used in the regression model. The 
+second plot will show the R-squared value obtained using each corresponding 
+number of principal components. By comparing these two plots, we can determine 
+the optimal number of principal components to use in the regression model.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+plot(cumsum(propvar), xlab = "Principal Component", ylab = "Cumulative Proportion of Variance Explained",
+     ylim = c(0,1), type = "b")
+
+plot(r2, xlab = "Principal Component", ylab = "R-squared with this many principal components",
+     ylim = c(0,1), type = "b")
+```
+
+# Resulst of Part 3
+
+It is important to note that there can be a difference between the curves of 
+the cumulative proportion of variance explained and the R-squared values, even 
+though PCA estimates the "proportion of variance" between the principal 
+components and R-squared estimates the "proportion of variance explained" in the
+response variable. In some cases, these two may not track well, indicating that 
+using a larger number of principal components may not necessarily lead to better
+performance in the regression model. Therefore, it is important to consider both
+the cumulative proportion of variance explained and the R-squared values when 
+determining the optimal number of principal components to use in a regression 
+model.
+
+Cross-validation was used to estimate a more realistic R-squared value, which 
+was lower than the R-squared value obtained on the training set. This overfitting
+issue may have contributed to the discrepancy in performance between the PCA 
+model and the non-PCA model, and could be one factor to consider when 
+interpreting the results.
+
+
+ Notice that the 5th principal component seems to make a big difference (both on
+ training data and in cross-validation).
+ 
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+pcc <- cbind(data[,16],pca$x[,5])
+model <- lm(V1~.,data = as.data.frame(pcc))
+#summary(model)
+#c <- cv.lm(as.data.frame(pcc),model,m=5) # cross-validate 
+1 - attr(c,"ms")*nrow(data)/sum((data$Crime - mean(data$Crime))^2) # calculate R-squared
+```
+
+# Part 4
+In this section, we will explore different methods for building regression models,
+including stepwise regression, lasso, and elastic net. These methods are used to
+select the most important variables for the regression model and prevent 
+overfitting. We will compare the results obtained from these different methods 
+to determine the optimal approach for building a regression model for this dataset.
+
+The R code conducts stepwise regression, lasso, and elastic net on both the raw 
+data and principal components obtained through PCA. The code performs three main
+tasks for each model: (1) identifies a set of variables using the specified 
+method, (2) constructs a regression model using the selected variables, and (3) 
+eliminates insignificant variables and builds a regression model using the 
+remaining variables. The R-squared value on the training data is reported for 
+each model, and cross-validation is employed to estimate the actual R-squared 
+value of the model. The elastic net models were tested using 11 different alpha 
+values ranging from 0.0 to 1.0 in increments of 0.1. 
+
+===============================================================
+
+We shall proceed to apply PCA on the variables and utilize the resultant 
+principal components to construct Stepwise, Lasso, and Elastic Net models.
+
+ Run PCA on matrix of scaled predictors
+ 
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+pca <- prcomp(data[,1:15], scale. = TRUE)
+summary(pca)
+```
+
+The following visualizations can be helpful in determining the optimal number of
+principal components to select for the model:
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+screeplot(pca, type="lines",col="blue")
+
+var <- pca$sdev^2
+propvar <- var/sum(var)
+
+plot(propvar, xlab = "Principal Component", 
+     ylab = "Proportion of Variance Explained",ylim = c(0,1), type = "b")
+
+plot(cumsum(propvar), xlab = "Principal Component", 
+     ylab = "Cumulative Proportion of Variance Explained", ylim = c(0,1), type = "b")
+```
+
+In this scenario, we shall utilize all the principal components instead of the 
+original variables and evaluate the performance of the three models: Stepwise, 
+Lasso, and Elastic Net.
+
+Creating a dataframe of response variable and PCs.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+PCcrime <- as.data.frame(cbind(pca$x, data[,16]))
+colnames(PCcrime)[16] <- "Crime"
+```
+
+## Step-Wise Method
+
+In backward stepwise regression, we start with the full model, including all the
+principal components, and gradually eliminate the least significant variables 
+until we end up with a simpler model. The simpler model will have only the 
+intercept and the principal components that are found to be significant. We 
+shall then use cross-validation to evaluate the performance of this model.
+
+Now use the code below to perform 5 fold CV:
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 5)
+```
+
+Step:  AIC=507.37
+outcome ~ PC1 + PC2 + PC4 + PC5 + PC6 + PC7 + PC12 + PC14 + 
+PC15
+
+Df Sum of Sq     RSS    AIC
+
+none---------------1498159 507.37
+
+ PC15  1     82173 1580332 507.88
+ 
+ PC6   1     92261 1590420 508.18
+ 
+ PC14  1    129212 1627371 509.26
+ 
+ PC7   1    203535 1701694 511.36
+ 
+ PC4   1    257832 1755991 512.83
+ 
+ PC12  1    494595 1992754 518.78
+ 
+ PC2   1    633037 2131196 521.94
+ 
+ PC1   1   1177568 2675727 532.63
+ 
+ PC5   1   2312556 3810715 549.25
+
+Fitting a new model with these 9 PCS:
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+mod_Step_PC = lm(Crime ~ PC15+PC6+PC14+PC7+PC4+PC12+PC2+PC1+PC5, data = PCcrime)
+summary(mod_Step_PC)
+```
+
+After applying backward stepwise regression on the principal components and 
+using cross-validation to evaluate the performance of the model, we obtained an 
+adjusted R-squared value of 0.729. This value is slightly lower than the 
+adjusted R-squared value obtained when using the same method on the original 
+variables. However, it is still a reasonably good value and indicates that the 
+selected principal components are significant in predicting the outcome variable.
+
+Now let's see how it cross-validates:
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+SStot <- sum((data$Crime - mean(data$Crime))^2)
+totsse <- 0
+for(i in 1:nrow(PCcrime)) {
+  mod_lasso_i = lm(Crime ~ PC15+PC6+PC14+PC7+PC4+PC12+PC2+PC1+PC5, data = PCcrime[-i,])
+  pred_i <- predict(mod_lasso_i,newdata=PCcrime[i,])
+  totsse <- totsse + ((pred_i - PCcrime[i,16])^2)
+}
+R2_mod <- 1 - totsse/SStot
+R2_mod
+```
+
+PC15 and PC6 were found to be insignificant in the model obtained through the 
+stepwise regression using principal components. After removing these two 
+components, the model was re-evaluated, and an adjusted R-squared value of 0.726
+was obtained using the remaining 7 principal components. This value is slightly 
+lower than the previous value obtained using all 9 principal components.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+mod_Step_PC = lm(Crime ~ PC14+PC7+PC4+PC12+PC2+PC1+PC5, data = PCcrime)
+summary(mod_Step_PC)
+```
+
+Now let's see how it cross-validates:
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+SStot <- sum((data$Crime - mean(data$Crime))^2)
+totsse <- 0
+for(i in 1:nrow(PCcrime)) {
+  mod_lasso_i = lm(Crime ~ PC14+PC7+PC4+PC12+PC2+PC1+PC5, data = PCcrime[-i,])
+  pred_i <- predict(mod_lasso_i,newdata=PCcrime[i,])
+  totsse <- totsse + ((pred_i - PCcrime[i,16])^2)
+}
+R2_mod <- 1 - totsse/SStot
+R2_mod
+```
+
+# Lasso Regression
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+#building lasso
+XP=data.matrix(PCcrime[,-16])
+YP=data.matrix(PCcrime$Crime)
+lasso_PC=cv.glmnet(x=as.matrix(PCcrime[,-16]),y=as.matrix(PCcrime$Crime),alpha=1,
+                nfolds = 5,type.measure="mse",family="gaussian")
+```
+
+Output the coefficients of the variables selected by lasso
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+coef(lasso_PC, s=lasso_PC$lambda.min)
+```
+
+We are fitting a model with 12 principal components (PCs) extracted from the 
+original variables using PCA. This model contains two more PCs than the original
+variables model.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+mod_lasso_PC = lm(Crime ~PC1+PC2+PC3+PC4+PC5+PC6+PC7+PC10+PC12+PC13+PC14+PC15,
+                  data = PCcrime)
+summary(mod_lasso_PC)
+```
+
+After selecting 12 PCs using Lasso regression, we fitted a new model and obtained
+an adjusted R-squared value of 0.7269. This is comparable to the previous model 
+with 10 original variables selected by Lasso regression. Therefore, using these
+12 PCs instead of the original variables can lead to a simpler model with similar
+performance.
+
+Now let's see how it cross-validates:
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+SStot <- sum((data$Crime - mean(data$Crime))^2)
+totsse <- 0
+for(i in 1:nrow(PCcrime)) {
+  mod_lasso_i = lm(Crime ~ PC1+PC2+PC3+PC4+PC5+PC6+PC7+PC10+PC12+PC13+PC14+PC15, data = PCcrime[-i,])
+  pred_i <- predict(mod_lasso_i,newdata=PCcrime[i,])
+  totsse <- totsse + ((pred_i - PCcrime[i,16])^2)
+}
+R2_mod <- 1 - totsse/SStot
+R2_mod
+```
+
+After removing the insignificant PCs (3, 6, 10, 13, and 15) from the Lasso 
+regression model, we get a model with 7 significant PCs, which is the same as 
+the model obtained from the stepwise PC model. The adjusted R-Squared value for 
+this model is 0.7164, which is slightly lower than the previous model with 12 PCs.
+
+## Elastic Net Model
+
+We calculate the R-squared values for different values of alpha by varying it 
+in steps of 0.1 from 0 to 1.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+R2_PC=c()
+for (i in 0:10) {
+  model = cv.glmnet(x=as.matrix(PCcrime[,-16]),y=as.matrix(PCcrime$Crime),
+                    alpha=i/10,nfolds = 5,type.measure="mse",family="gaussian")
+  
+  #The deviance(dev.ratio ) shows the percentage of deviance explained, 
+  #(equivalent to r squared in case of regression)
+  
+  R2_PC = cbind(R2_PC,
+model$glmnet.fit$dev.ratio[which(model$glmnet.fit$lambda == model$lambda.min)])
+}
+
+R2_PC
+```
+
+Best value of alpha
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+alpha_best_PC = (which.max(R2_PC)-1)/10
+alpha_best_PC
+```
+
+An interesting observation after using PCs instead of original variables is that
+the optimal value of alpha for Elastic Net regression is 0.3, which is closer to
+a Lasso model than a Ridge model. Moreover, the resulting R-Squared values are 
+slightly higher than before. Therefore, we decide to build the Elastic Net model
+using this optimal alpha value of 0.3.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+alpha_best = (which.max(R2)-1)/10
+
+Elastic_net_PC=cv.glmnet(x=as.matrix(PCcrime[,-16]),y=as.matrix(PCcrime$Crime),
+               alpha=alpha_best,nfolds = 5,type.measure="mse",family="gaussian")
+```
+
+Output the coefficients of the variables selected by Elastic Net
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+coef(Elastic_net_PC, s=Elastic_net_PC$lambda.min)
+```
+
+The Lasso model utilizes 12 PCs while the Elastic Net model uses only 10. We will
+now assess the relative performance of these two models.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+mod_Elastic_net_PC = lm(Crime ~PC1+PC2+PC3+PC4+PC5+PC6+PC7+PC12+PC14+PC15, data = PCcrime)
+summary(mod_Elastic_net_PC)
+```
+
+When using the Elastic Net with 10 PCs, the R-Squared value is slightly higher 
+than that of Lasso with 12 PCs. In comparison to Stepwise and Lasso, the Elastic
+Net shows relatively superior performance.
+
+Now let's see how it cross-validates:
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+SStot <- sum((data$Crime - mean(data$Crime))^2)
+totsse <- 0
+for(i in 1:nrow(PCcrime)) {
+  mod_lasso_i = lm(Crime ~ PC1+PC2+PC3+PC4+PC5+PC6+PC7+PC12+PC14+PC15, data = PCcrime[-i,])
+  pred_i <- predict(mod_lasso_i,newdata=PCcrime[i,])
+  totsse <- totsse + ((pred_i - PCcrime[i,16])^2)
+}
+R2_mod <- 1 - totsse/SStot
+R2_mod
+```
+
+After removing the apparently insignificant variables PC3, PC6, and PC15, we end
+up with the same model that we had before conducting this process of removing 
+insignificant variables from a model based on principal components.
+
+# Conclusion
+
+ Variable selection plays a crucial role in enhancing model performance,
+and the small number of data points (only around three times the number of 
+variables) might contribute to the difference. Overfitting is common in such 
+cases, and selecting a smaller subset of variables is vital. For example, the 
+complete regression model based on the original data displayed an R-Squared 
+value of 0.80 on the training data, but cross-validation estimated it to be 
+0.41. However, the variable-selection models performed significantly better.
+
+Secondly, eliminating variables that appear insignificant in a regression model 
+can have a positive impact on the model's quality. In several cases, this 
+approach enhanced model performance.
+
+Thirdly, in this study, employing principal component analysis (PCA) did not 
+seem to be useful. Nevertheless, in some cases, PCA can be highly valuable.
+
+
+
+
+
+
+
